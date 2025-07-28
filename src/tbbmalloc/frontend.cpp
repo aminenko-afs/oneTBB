@@ -1949,6 +1949,13 @@ void StartupBlock::free(void *ptr)
  * useful for detecting errors in the double-check pattern.
  */
 static std::atomic<intptr_t> mallocInitialized{0};   // implicitly initialized to 0
+
+//! Value indicating if allocated memory needs to be initialized
+/* 0 - default behaviour (no fill)
+ * 1 - fill with random data
+ * 2 - fill with zeros like calloc()
+*/
+static int mallocFill{0};
 static MallocMutex initMutex;
 
 /** The leading "\0" is here so that applying "strings" to the binary
@@ -2064,6 +2071,10 @@ static bool GetBoolEnvironmentVariable(const char* name) {
     return tbb::detail::r1::GetBoolEnvironmentVariable(name);
 }
 
+static bool GetIntegralEnvironmentVariable(const char* name) {
+    return tbb::detail::r1::GetIntegralEnvironmentVariable(name);
+}
+
 //! Ensures that initMemoryManager() is called once and only once.
 /** Does not return until initMemoryManager() has been completed by a thread.
     There is no need to call this routine if mallocInitialized==2 . */
@@ -2097,6 +2108,9 @@ static bool doInitialization()
             fputs(VersionString+1,stderr);
             hugePages.printStatus();
         }
+
+        int fill = GetIntegralEnvironmentVariable("TBB_MEMFILL");
+        if ( fill != -1 ) mallocFill = fill;
     }
     /* It can't be 0 or I would have initialized it */
     MALLOC_ASSERT( mallocInitialized.load(std::memory_order_relaxed)==2, ASSERT_TEXT );
@@ -2946,6 +2960,14 @@ extern "C" void * scalable_malloc(size_t size)
 {
     void *ptr = internalMalloc(size);
     if (!ptr) errno = ENOMEM;
+    
+    if ( ptr ) {
+        switch ( mallocFill ) {
+        case 1: arc4random_buf(ptr,size); break;
+        case 2: memset(ptr,0,size); break;
+        default: break;
+        }
+    }
     return ptr;
 }
 
